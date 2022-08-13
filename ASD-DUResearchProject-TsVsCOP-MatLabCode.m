@@ -1,76 +1,117 @@
 function UsingCosmosData
+% This section defines the funtions that should be run, the data that is to be saved and then plotted %
+% The plotted data will appear on a single window, with 2 graphs displayed %
 
-[t,SoilTemp]=PlotData;
-
-Ts=290;
-
-Ts=SoilTemp;
-
-wait = waitbar(0,'Please wait...');
-
-N=84550;
-for k=1:N
-    COPn(k)=SoilTempVsCOP(Ts(k));
-    waitbar(k/N,wait)
-    save('MyData.mat','COPn','Ts','t')
+% k selects the file being assessed. This value ranges from 3 to 53 %
+% All files can be run consecutively by using "k=3:53" %
+for k=3;
+COPmean(k)=COPmeanFun(k);
 end
-close(wait)
 
-load('MyData.mat')
+% This displays the mean COP of the data being run
 
-N=numel(COPn);
+disp(COPmean)
+
+
+function COPmean=COPmeanFun(k)
+
+% This sub-function calculates the mean value of COP for the data being run
+% by using the Ideal Reversed Carnot Cycle code to find the COP values of
+% 100 Linearly spaced temperature points from the relevent data set. 
+% This data is then used as a lookup table to claculate the other COP
+% values (COPn) for the remaining Ts values in the file.
+
+
+%Define refigerant
+F='R134a';
+%Import temperature data
+[t,Ts,MyLocation]=ImportTempData(k);
+%Determine range of soil temperatures experienced in the data set being run
+Tmin=min(Ts);
+Tmax=max(Ts);
+% "Ti" determines the set of temperatures used for the lookup table by
+% linearly spacing 100 points along the Ts curve produced
+Ti=linspace(Tmin,Tmax,100);
+% "COPi" Determines the corresponding set of COP values for the linearly
+% spaced Ti values found above.
+for k=1:numel(Ti)
+    COPi(k)=SoilTempVsCOP(Ti(k),F);
+end
+ 
+% Use interpolation to work out COP for time-series
+COPn=interp1(Ti,COPi,Ts);
+
+% Number checking section, needed to assess errors
+num2str([Ts(COPn<0) COPn(COPn<0)],4);
+num2str([Ti; COPi]',4);
+
+% This section excludes data values for the summer months in the UK, as the
+% winter months are the ones under investigation. 
+% This is done by using a date vector function to define summer period
+% (Start April to End August) and then having the COP values calculated for
+% those time periods equal to "NaN" which will not display on the graph.
+[yyyy,mm,dd]=datevec(t);
+MySummer=mm>=5&mm<=8;
+% Make summer COP NaN
+COPn(MySummer)=NaN;
+
+% Mean COP is determined 
+COPmean=mean(COPn,'omitnan');
+
 figure(1)
 clf
 subplot(2,1,1)
-plot(t(1:N),Ts(1:N))
-datetick('x','dd-mmm')
+plot(t,Ts)
+datetick('x','mm-yyyy','keeplimits')
+title(MyLocation(11:15))
 subplot(2,1,2)
-plot(t(1:N),COPn(1:N))
-datetick('x','dd-mmm')
-
-figure(2)
-clf
-plot(Ts(1:N),COPn(1:N),'.')
+plot(t,COPn)
+ylim([0 5])
+datetick('x','mm-yyyy','keeplimits')
+drawnow
 
 
-%xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+%xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%
 
+function  [t,SoilTemp,MyLocation]=ImportTempData(k)
 
-function  [t,SoilTemp]=PlotData
+% This sub-function is the function that looked up data from the relevent Excel CSV file %
+% There are 2 "MyDir" locations in this section as the work was done both on my personal Laptop and my Home PC, each had different file loaction routes %
 
-MYDir=['C:\Me Stuff\Uni\Durham\Research Project\Code\COSMOS-UK_HydroSoil_SH_2013-2019\']; %Laptop
-% MYDir=['D:\Uni\DURHAM\Research Project\MatLab\Lookup\COSMOS-UK_HydroSoil_SH_2013-2019\']; %PC
+% MYDir=['C:\Me Stuff\Uni\Durham\Research Project\Code\COSMOS-UK_HydroSoil_SH_2013-2019\']; %Laptop
+MYDir=['D:\Uni\DURHAM\Research Project\MatLab\Lookup\COSMOS-UK_HydroSoil_SH_2013-2019\']; %PC
 MyFileNames=dir(MYDir);
 
-
-k=3; %file number goes from 3 to 53
+% Detects and displays the loaction name of the file data being read for
+% calculation.
+MyLocation=MyFileNames(k).name;
 opts=detectImportOptions([MYDir MyFileNames(k).name]);
 opts.Delimiter = {','};
-%This will store all the data in a readable table
+% This will store all the data in a readable table
 alldata=readtable([MYDir MyFileNames(k).name], opts);
-%Convert numeric data to an array
+% Convert numeric data to an array
 numdata=table2array(alldata(:,3:end));
 numdata(numdata==-9999)=NaN;
 
+% This section selects the column being read from the CSV file. The number
+% and relating look up column is shown at the bottom of this file.
 SoilTemp=numdata(:,[45:45]-2);
+% SoilTemp has 273.15 added here to convert degree's Celsius to Kelvin as
+% the CoolProp toolbox uses Kelvin to perform the thermodynamic cycle.
 SoilTemp=SoilTemp+273.15;
 
-%Define start time
+% As each file has a unique start time, this has to be change manually at this point, with t0 being the start time %
 t0=datenum(2015,3,6,13,30,0);
 j=[1:size(numdata,1)]';
-t=t0+(j-1)/58;
+t=t0+(j-1)/48;
 
-%
-figure(1)
-clf
-plot(t,SoilTemp)
-% xlim(datenum(2016,[5 6],1))
-datetick('x','mmm-dd','keeplimits')
-ylabel('Temperature (K)')
 
-%xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+%xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%
 
-function COPn=SoilTempVsCOP(Ts)
+function COPn=SoilTempVsCOP(Ts,F)
+
+% This sub-function calculated and defines the Ideal Reverse Carnot Cycle %
+% A series of pre-defined parameters are used to start the process %
 
 % Parameters
 % T = Temperature K
@@ -82,29 +123,24 @@ function COPn=SoilTempVsCOP(Ts)
 % Qout = Work out at condenser kW - Qout = Heating Load
 % COP = Coefficient of Performance
 % HL = Heating Load (W / kW)
-%
-%
-% 
 
-%The opperating temperature of the refrigerant at points 1 and 4 is -6C (=267K).
-% The temperature leaving the evaporator (T3) is to be 45C (318K)
-%
-% Working Fluid
-F='R134a';
 
-% Temperatures (K)
+%The assumed opperating temperature of the refrigerant at points 1 and 4 is 0C (=273K) %
+% The temperature leaving the evaporator (T3) is to be 45C (318K) as determined from data decribed in the report %
+
+% Assumed temperatures (Kelvin)
 T1=273;
 
 T3=318;
 
-%Quality
+% Quality of positions 1 and 3 assumed to be 1 and 0, respectively. This is because these points are assumed to lie on the thermodynamic boundary curve (P-h diagram) %
 Q1=1;
 Q3=0;
 % Q4 is to be calculated later
 
-% Ground Heat Exchanger (GHE)
+% Ground Heat Exchanger (GHE) calculated length input here %
 GHEL=853; % Length of the GHE (m)
-GHER=2; % Thermal resistance of the GHE (mK/W)
+GHER=2; % Thermal resistance of the GHE K/W
 
 
 
@@ -117,9 +153,6 @@ Af=96; % floor area (m^2)
 height=2.5; % height from floor to ceiling (m)
 Np=4; % number of people
 
-% % SoilTemp in the excel is in Degree's C, CoolProp runs in Kelvin, so 273.15 needs to
-% % be added to the value obtained from the excel
-
 T4=T1;
 
 % Heating load will be initially calculated in BTU, so a conversion is applied.
@@ -131,19 +164,18 @@ HL=[(Af*height*141)-(Np*500)]*0.00029307107; % Heating Load in kW
 Qout=HL;
 
 
-% Point 1 - Known temperature and quality
+% Point 1 - Known temperature and quality can calculate other values needed
 P1=py.CoolProp.CoolProp.PropsSI('P','T',T1,'Q',Q1,F);
 h1=py.CoolProp.CoolProp.PropsSI('H','T',T1,'Q',Q1,F);
 s1=py.CoolProp.CoolProp.PropsSI('S','T',T1,'Q',Q1,F);
 
-% Point 3 - Known temperature and quality
+% Point 3 - Known temperature and quality can calculate other values needed
 P3=py.CoolProp.CoolProp.PropsSI('P','T',T3,'Q',Q3,F);
 h3=py.CoolProp.CoolProp.PropsSI('H','T',T3,'Q',Q3,F);
 s3=py.CoolProp.CoolProp.PropsSI('S','T',T3,'Q',Q3,F);
 
-% Point 4 - Temperature known
-% P1 = P4
-% h4 = h3
+% Point 4 - Thermodynamic reationships known
+
 P4=P1;
 h4=h3;
 % To find Q4, you need the enthalpy values for point 4 at quality 1 and 0,
@@ -174,15 +206,7 @@ Win=Mr*(h2-h1);
 % the target volume to the amount of power being input by the compressor
 COP=Qout/Win;
 
-% For the next cycle to begin, a new value of h1 needs to be calculated
-% using a calculated Qin (kW) value.
-% Need to revisiti how to lookup the soil temperature data from the
-% CVS spreadsheet, still a little bit confused.
-% Ts = Temperatures of the soil at 50cm depth
-% Ts needs to be looked up from the cvs files for each run. Little stuck
-% on that, need to go through again.
-
-
+% For the next cycle to begin, a new value of h1 needs to be calculated using a calculated Qin (kW) value.
 
 Qin=(GHEL*((Ts-T4)/GHER))/1000;
 
@@ -191,7 +215,9 @@ Qin=(GHEL*((Ts-T4)/GHER))/1000;
 % h1n (h1 new).
 h1n=(Qin/Mr)+h4;
 
-
+% The Ideal Reversed Carnot Cycle is then repeated using the same method as previously stated but with heat energy being added through the h1n value %
+% As it is assumed that the temperature of position 4 and 1 is constant, the enthalpy of the system changes %
+% As the soil temperature is greater than that of the working fluid, the working fluid gains energy in the form of increased enthalpy %
 
 P1=py.CoolProp.CoolProp.PropsSI('P','T',T1,'Q',Q1,F);
 
@@ -225,10 +251,13 @@ Winn=Mr*(h2-h1n);
 
 % COP (unitless) is the ratio of the useful heat energy being delivered to
 % the target volume to the amount of power being input by the compressor
+% COPn is the value of COP calculated for each Ts value input to the system
 COPn=Qout/Winn;
 
+%xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%
 
-%xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+%
+%
 % 1	DATE_TIME
 % 2	SITE_ID
 % 3	LWIN
