@@ -129,7 +129,7 @@ function COPn=SoilTempVsCOP(Ts,F)
 % The temperature leaving the evaporator (T3) is to be 45C (318K) as determined from data decribed in the report %
 
 % Assumed temperatures (Kelvin)
-T1=273;
+T1=267;
 
 T3=318;
 
